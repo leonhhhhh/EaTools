@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TOTP验证码生成器</title>
+    <script src="https://cdn.jsdelivr.net/npm/crypto-js@4.1.1/crypto-js.min.js"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 500px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f7fa;
+        }
+        .container {
+            background: white;
+            border-radius: 10px;
+            padding: 25px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #2c3e50;
+            text-align: center;
+            margin-bottom: 25px;
+        }
+        .input-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #2c3e50;
+        }
+        input {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 16px;
+            box-sizing: border-box;
+        }
+        button {
+            width: 100%;
+            padding: 14px;
+            background-color: #3498db;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            margin-top: 10px;
+        }
+        button:hover {
+            background-color: #2980b9;
+        }
+        #result {
+            font-size: 32px;
+            font-weight: bold;
+            text-align: center;
+            margin: 25px 0;
+            color: #27ae60;
+            letter-spacing: 3px;
+        }
+        #countdown {
+            text-align: center;
+            color: #7f8c8d;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>TOTP验证码生成器</h1>
+        
+        <div class="input-group">
+            <label for="secret">Base32密钥</label>
+            <input type="text" id="secret" placeholder="例如: JBSWY3DPEHPK3PXP" value="WPOZZJVFJFK5GGEE">
+        </div>
+        
+        <div class="input-group">
+            <label for="offset">时间偏移（秒）</label>
+            <input type="number" id="offset" value="15">
+        </div>
+        
+        <button onclick="generateTOTP()">生成验证码</button>
+        
+        <div id="result">等待生成...</div>
+        <div id="countdown"></div>
+    </div>
+
+    <script>
+        // 精准Base32解码
+        function base32Decode(base32) {
+            const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+            base32 = base32.replace(/=+$/, '').toUpperCase();
+            let bits = '';
+            
+            for (let char of base32) {
+                const val = alphabet.indexOf(char);
+                if (val === -1) throw new Error(`非法Base32字符: ${char}`);
+                bits += val.toString(2).padStart(5, '0');
+            }
+            
+            let bytes = [];
+            for (let i = 0; i < bits.length; i += 8) {
+                bytes.push(parseInt(bits.substr(i, 8), 2));
+            }
+            return new Uint8Array(bytes);
+        }
+
+        function generateTOTP() {
+            const secret = document.getElementById('secret').value.trim();
+            const offset = parseInt(document.getElementById('offset').value) || 0;
+            
+            try {
+                // 1. Base32解码
+                const keyBytes = base32Decode(secret);
+                const keyHex = Array.from(keyBytes).map(b => b.toString(16).padStart(2, '0')).join('');
+                
+                // 2. 时间窗口计算（含偏移量）
+                const timestamp = Math.floor(Date.now() / 1000) + offset;
+                const timeWindow = Math.floor(timestamp / 30);
+                
+                // 3. 转换为8字节大端序
+                const timeBytes = [
+                    0, 0, 0, 0, // 前4字节补0
+                    (timeWindow >>> 24) & 0xFF,
+                    (timeWindow >>> 16) & 0xFF,
+                    (timeWindow >>> 8) & 0xFF,
+                    timeWindow & 0xFF
+                ];
+                
+                // 4. HMAC-SHA1计算
+                const timeStr = String.fromCharCode(...timeBytes);
+                const hmac = CryptoJS.HmacSHA1(
+                    CryptoJS.enc.Utf8.parse(timeStr),
+                    CryptoJS.enc.Hex.parse(keyHex)
+                );
+                const hmacHex = hmac.toString();
+                
+                // 5. 动态截断
+                const offsetPos = parseInt(hmacHex.slice(-1), 16);
+                const binaryStr = hmacHex.substr(offsetPos*2, 8);
+                const binary = parseInt(binaryStr, 16) & 0x7fffffff;
+                const otp = (binary % 1000000).toString().padStart(6, '0');
+                
+                // 显示结果
+                document.getElementById('result').textContent = otp;
+                
+                // 修正后的倒计时逻辑（考虑偏移量）
+                const updateCountdown = () => {
+                    const now = Math.floor(Date.now() / 1000) + offset;
+                    const remaining = 30 - (now % 30);
+                    document.getElementById('countdown').textContent = `刷新倒计时: ${remaining}秒`;
+                    
+                    if (remaining <= 1) {
+                        setTimeout(generateTOTP, 1000);
+                    } else {
+                        setTimeout(updateCountdown, 1000);
+                    }
+                };
+                updateCountdown();
+
+            } catch (e) {
+                document.getElementById('result').textContent = '生成失败';
+                document.getElementById('countdown').textContent = '';
+                alert("错误: " + e.message);
+            }
+        }
+    </script>
+</body>
+</html>
